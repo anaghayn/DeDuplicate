@@ -31,35 +31,57 @@ def deduplicate_leads(leads):
     logs = []
 
     for lead in leads:
-        existing_lead = unique_by_id.get(lead["_id"]) or unique_by_email.get(lead["email"])
-
-        if existing_lead:
-            # Resolve conflicts
+        # Handle duplicate by `_id`
+        if lead["_id"] in unique_by_id:
+            existing = unique_by_id[lead["_id"]]
             current_date = parse_date(lead["entryDate"])
-            existing_date = parse_date(existing_lead["entryDate"])
-            
+            existing_date = parse_date(existing["entryDate"])
+
             if current_date > existing_date or (
                 current_date == existing_date and lead not in unique_by_id.values()
             ):
                 log_entry = {
-                    "source_record": existing_lead,
+                    "source_record": existing,
                     "output_record": lead,
                     "field_changes": {
-                        key: {"from": existing_lead[key], "to": lead[key]} 
-                        for key in lead.keys() 
-                        if lead[key] != existing_lead[key]
+                        key: {"from": existing[key], "to": lead[key]}
+                        for key in lead.keys()
+                        if lead[key] != existing[key]
                     },
                 }
                 logs.append(log_entry)
                 unique_by_id[lead["_id"]] = lead
-                unique_by_email[lead["email"]] = lead
         else:
             unique_by_id[lead["_id"]] = lead
+
+    # Reconcile email uniqueness
+    for lead in unique_by_id.values():
+        if lead["email"] in unique_by_email:
+            existing = unique_by_email[lead["email"]]
+            current_date = parse_date(lead["entryDate"])
+            existing_date = parse_date(existing["entryDate"])
+
+            # Prefer the newest entry
+            if current_date > existing_date:
+                log_entry = {
+                    "source_record": existing,
+                    "output_record": lead,
+                    "field_changes": {
+                        key: {"from": existing[key], "to": lead[key]}
+                        for key in lead.keys()
+                        if lead[key] != existing[key]
+                    },
+                }
+                logs.append(log_entry)
+                unique_by_email[lead["email"]] = lead
+        else:
             unique_by_email[lead["email"]] = lead
 
-    # Consolidate unique records
-    deduplicated = list({id: lead for id, lead in unique_by_id.items()}.values())
-    return deduplicated, logs
+    # Final consolidated output
+    return list(unique_by_email.values()), logs
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="De-duplicate leads in JSON file.")
